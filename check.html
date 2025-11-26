@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>University Face Check-in Pro (Camera Fixed)</title>
+    
+    <!-- React & Tailwind -->
+    <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Fonts & Icons -->
+    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+    <style>
+        body {
+            font-family: 'Kanit', sans-serif;
+            background-color: #0a192f;
+            color: #e6f1ff;
+        }
+        
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0a192f; }
+        ::-webkit-scrollbar-thumb { background: #64ffda; border-radius: 4px; }
+
+        /* Neon Effects */
+        .neon-green-text { color: #64ffda; text-shadow: 0 0 10px rgba(100, 255, 218, 0.5); }
+        .glass-panel {
+            background: rgba(17, 34, 64, 0.7);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(100, 255, 218, 0.1);
+        }
+        .camera-feed { transform: scaleX(-1); }
+        
+        /* Animations */
+        @keyframes growBar {
+            from { width: 0%; }
+        }
+        .bar-animate {
+            animation: growBar 1s ease-out forwards;
+        }
+    </style>
+
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        navy: { 900: '#0a192f', 800: '#112240', 700: '#233554' },
+                        neon: { green: '#64ffda', red: '#ff5555', blue: '#57cbff' }
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef, useMemo } = React;
+
+        // --- 🔴 ใส่ลิงก์ Google Apps Script ตรงนี้ ---
+        const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwJm8wGATgb3mFaiLWJPEiq1b7_6cDRoOP_VFMT7OTKmC-yqBa5W8CGvx1RG2yIT9w6/exec"; 
+
+        // --- Constants ---
+        const SUBJECTS = ["Prompt Engineering", "Artificial Intelligence (AI)", "Computer Vision", "Data Science", "Web Technology"];
+        const SECTIONS = ["Sec.1", "Sec.2", "Sec.3", "Sec.4"];
+
+        // --- Utility Components ---
+        const Button = ({ children, onClick, variant = "primary", className = "", icon, disabled }) => {
+            const baseStyle = "px-6 py-3 rounded-lg font-bold transition-all duration-300 flex items-center justify-center gap-2 shadow-lg active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed";
+            const variants = {
+                primary: "bg-neon-green text-navy-900 hover:bg-emerald-300",
+                danger: "bg-neon-red text-white hover:bg-red-600",
+                outline: "border-2 border-neon-green text-neon-green hover:bg-neon-green/10",
+                ghost: "bg-navy-800 text-slate-300 hover:bg-navy-700 border border-navy-700"
+            };
+            return (
+                <button onClick={onClick} disabled={disabled} className={`${baseStyle} ${variants[variant]} ${className}`}>
+                    {icon && <i className={`fas ${icon}`}></i>}
+                    {children}
+                </button>
+            );
+        };
+
+        const Input = ({ label, value, onChange, placeholder, type = "text", maxLength, error }) => (
+            <div className="mb-4">
+                <label className="block text-neon-green text-sm mb-2">{label}</label>
+                <input 
+                    type={type}
+                    value={value}
+                    onChange={onChange}
+                    placeholder={placeholder}
+                    maxLength={maxLength}
+                    className={`w-full bg-navy-800 border ${error ? 'border-neon-red' : 'border-navy-700'} rounded p-3 text-white focus:border-neon-green focus:outline-none focus:ring-1 focus:ring-neon-green transition-colors`}
+                />
+                {error && <p className="text-neon-red text-xs mt-1">{error}</p>}
+            </div>
+        );
+
+        const Select = ({ label, value, onChange, options }) => (
+            <div className="mb-4">
+                <label className="block text-neon-green text-sm mb-2">{label}</label>
+                <select 
+                    value={value}
+                    onChange={onChange}
+                    className="w-full bg-navy-800 border border-navy-700 rounded p-3 text-white focus:border-neon-green focus:outline-none"
+                >
+                    <option value="">-- เลือกรายการ --</option>
+                    {options.map((opt, idx) => (
+                        <option key={idx} value={opt}>{opt}</option>
+                    ))}
+                </select>
+            </div>
+        );
+
+        // --- Main Application ---
+        const App = () => {
+            const [activeTab, setActiveTab] = useState("register"); 
+            const [users, setUsers] = useState([]);
+            const [attendanceLog, setAttendanceLog] = useState([]);
+
+            useEffect(() => {
+                const savedUsers = localStorage.getItem('uni_users');
+                const savedLogs = localStorage.getItem('uni_logs');
+                if (savedUsers) setUsers(JSON.parse(savedUsers));
+                if (savedLogs) setAttendanceLog(JSON.parse(savedLogs));
+            }, []);
+
+            const sendToGoogleSheet = (payload) => {
+                if (!WEB_APP_URL) return;
+                fetch(WEB_APP_URL, {
+                    method: 'POST',
+                    mode: 'no-cors',
+                    cache: 'no-cache',
+                    headers: { 'Content-Type': 'text/plain' },
+                    redirect: 'follow',
+                    body: JSON.stringify(payload)
+                }).catch(err => console.error("Error sending to sheet:", err));
+            };
+
+            const saveUser = (newUser) => {
+                const updatedUsers = [...users, newUser];
+                setUsers(updatedUsers);
+                localStorage.setItem('uni_users', JSON.stringify(updatedUsers));
+                
+                sendToGoogleSheet({
+                    action: 'register',
+                    studentId: newUser.studentId,
+                    firstName: newUser.firstName,
+                    lastName: newUser.lastName,
+                    subject: newUser.subject,
+                    section: newUser.section,
+                    photo: newUser.photo
+                });
+
+                alert(`บันทึกข้อมูล ${newUser.firstName} เรียบร้อย! ✅`);
+            };
+
+            const saveAttendance = (records) => {
+                const newLogs = [...attendanceLog, ...records];
+                setAttendanceLog(newLogs);
+                localStorage.setItem('uni_logs', JSON.stringify(newLogs));
+
+                sendToGoogleSheet({
+                    action: 'checkin',
+                    records: records
+                });
+
+                alert("บันทึกการเข้าเรียนลง Sheet เรียบร้อย! 💾");
+            };
+
+            return (
+                <div className="min-h-screen flex flex-col md:flex-row">
+                    <nav className="w-full md:w-64 bg-navy-800 p-6 flex flex-col border-r border-navy-700 z-20 shadow-2xl">
+                        <div className="mb-10 flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-full bg-neon-green flex items-center justify-center shadow-[0_0_15px_rgba(100,255,218,0.5)]">
+                                <i className="fas fa-atom text-navy-900 text-xl"></i>
+                            </div>
+                            <div>
+                                <h1 className="text-xl font-bold tracking-wider text-white">Uni<span className="text-neon-green">Check</span></h1>
+                                <p className="text-[10px] text-slate-400">AI Attendance System</p>
+                            </div>
+                        </div>
+                        <div className="space-y-4 flex-1">
+                            <NavButton active={activeTab === 'register'} onClick={() => setActiveTab('register')} icon="fa-id-card" label="ลงทะเบียน" />
+                            <NavButton active={activeTab === 'checkin'} onClick={() => setActiveTab('checkin')} icon="fa-user-check" label="เช็คชื่อ" />
+                            <NavButton active={activeTab === 'stats'} onClick={() => setActiveTab('stats')} icon="fa-chart-pie" label="สถิติ" />
+                            <NavButton active={activeTab === 'data'} onClick={() => setActiveTab('data')} icon="fa-table" label="ฐานข้อมูล" />
+                        </div>
+                    </nav>
+
+                    <main className="flex-1 p-4 md:p-8 overflow-y-auto bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] relative">
+                        <div className="absolute inset-0 bg-navy-900/95 pointer-events-none -z-10"></div>
+                        {activeTab === 'register' && <RegisterPanel onSave={saveUser} />}
+                        {activeTab === 'checkin' && <AttendancePanel users={users} onSaveAttendance={saveAttendance} />}
+                        {activeTab === 'stats' && <StatsPanel users={users} logs={attendanceLog} />}
+                        {activeTab === 'data' && <DataPanel users={users} logs={attendanceLog} />}
+                    </main>
+                </div>
+            );
+        };
+
+        const NavButton = ({ active, onClick, icon, label }) => (
+            <button 
+                onClick={onClick}
+                className={`w-full text-left p-4 rounded-xl transition-all duration-300 flex items-center gap-3 ${active ? 'bg-neon-green text-navy-900 font-bold shadow-[0_0_15px_rgba(100,255,218,0.3)]' : 'text-slate-300 hover:bg-navy-700 hover:text-white'}`}
+            >
+                <i className={`fas ${icon} ${active ? 'animate-pulse' : ''} w-6`}></i>
+                {label}
+            </button>
+        );
+
+        // --- 1. Register Panel (Fixed Camera Logic) ---
+        const RegisterPanel = ({ onSave }) => {
+            const videoRef = useRef(null);
+            const canvasRef = useRef(null);
+            const [formData, setFormData] = useState({ firstName: '', lastName: '', studentId: '', subject: '', section: '' });
+            const [capturedImages, setCapturedImages] = useState([]);
+            const [isCapturing, setIsCapturing] = useState(false);
+            const [captureCount, setCaptureCount] = useState(0);
+            const [errors, setErrors] = useState({});
+            
+            // State สำหรับเก็บ Stream และ สถานะการเปิดกล้อง
+            const [mediaStream, setMediaStream] = useState(null);
+            const [isCameraActive, setIsCameraActive] = useState(false);
+
+            // Effect: เมื่อได้ Stream มาแล้ว และจอ (videoRef) พร้อม ให้ยัด Stream ใส่จอ
+            useEffect(() => {
+                if (isCameraActive && mediaStream && videoRef.current) {
+                    videoRef.current.srcObject = mediaStream;
+                    videoRef.current.play().catch(err => console.error("Play error:", err));
+                }
+            }, [isCameraActive, mediaStream]);
+
+            // Cleanup: ปิดกล้องเมื่อเปลี่ยนหน้า
+            useEffect(() => {
+                return () => {
+                    if (mediaStream) {
+                        mediaStream.getTracks().forEach(track => track.stop());
+                    }
+                };
+            }, [mediaStream]);
+
+            const startCamera = async () => {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+                    setMediaStream(stream); // เก็บ Stream ไว้ก่อน
+                    setIsCameraActive(true); // สั่งเปิดจอ
+                } catch (err) {
+                    console.error("Camera Error:", err);
+                    alert("ไม่สามารถเปิดกล้องได้ กรุณาอนุญาตการใช้งานกล้องใน Browser");
+                }
+            };
+
+            const validateId = (id) => {
+                if (id.length !== 11) return "รหัสต้องมี 11 หลัก";
+                if (!/^\d+$/.test(id)) return "ต้องเป็นตัวเลขเท่านั้น";
+                return "";
+            };
+
+            const handleIdChange = (e) => {
+                const val = e.target.value;
+                if (/^\d*$/.test(val) && val.length <= 11) {
+                    setFormData({ ...formData, studentId: val });
+                    setErrors({ ...errors, studentId: val.length === 11 ? "" : "กรุณากรอกให้ครบ 11 หลัก" });
+                }
+            };
+
+            const startBatchCapture = async () => {
+                if (!isCameraActive) return alert("กรุณาเปิดกล้องก่อนครับ");
+                setIsCapturing(true);
+                setCapturedImages([]);
+                setCaptureCount(0);
+                for (let i = 1; i <= 5; i++) {
+                    await new Promise(resolve => setTimeout(resolve, 800));
+                    captureSingleShot();
+                    setCaptureCount(i);
+                }
+                setIsCapturing(false);
+            };
+
+            const captureSingleShot = () => {
+                const video = videoRef.current;
+                const canvas = canvasRef.current;
+                if (video && canvas) {
+                    const ctx = canvas.getContext('2d');
+                    canvas.width = 320; canvas.height = 240;
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+                    setCapturedImages(prev => [...prev, canvas.toDataURL('image/jpeg', 0.7)]);
+                }
+            };
+
+            const handleSubmit = () => {
+                const idError = validateId(formData.studentId);
+                if (idError) { setErrors({...errors, studentId: idError}); return; }
+                if (!formData.firstName || !formData.subject || capturedImages.length < 5) {
+                    alert("กรุณากรอกข้อมูลให้ครบและถ่ายรูปให้ครบ 5 ครั้ง");
+                    return;
+                }
+                onSave({ ...formData, photo: capturedImages[0], dataset: capturedImages, id: Date.now() });
+                setFormData({ firstName: '', lastName: '', studentId: '', subject: '', section: '' });
+                setCapturedImages([]);
+                setCaptureCount(0);
+            };
+
+            return (
+                <div className="max-w-5xl mx-auto animate-[fadeIn_0.5s]">
+                    <h2 className="text-3xl font-bold mb-6 text-white border-l-4 border-neon-green pl-4">ลงทะเบียนนักศึกษา</h2>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                        <div className="glass-panel p-6 rounded-2xl shadow-xl h-fit">
+                            <Input label="รหัสนักศึกษา (11 หลัก)" placeholder="xxxxxxxxxxx" value={formData.studentId} onChange={handleIdChange} maxLength={11} error={errors.studentId} />
+                            <div className="grid grid-cols-2 gap-4">
+                                <Input label="ชื่อจริง" value={formData.firstName} onChange={e => setFormData({...formData, firstName: e.target.value})} />
+                                <Input label="นามสกุล" value={formData.lastName} onChange={e => setFormData({...formData, lastName: e.target.value})} />
+                            </div>
+                            <div className="grid grid-cols-2 gap-4">
+                                <Select label="รายวิชา" options={SUBJECTS} value={formData.subject} onChange={e => setFormData({...formData, subject: e.target.value})} />
+                                <Select label="Section" options={SECTIONS} value={formData.section} onChange={e => setFormData({...formData, section: e.target.value})} />
+                            </div>
+                        </div>
+                        <div className="flex flex-col gap-4">
+                            {/* Camera Area */}
+                            <div className="relative rounded-2xl overflow-hidden border-2 border-navy-700 shadow-2xl bg-black aspect-video group">
+                                {!isCameraActive ? (
+                                    <div className="absolute inset-0 flex flex-col items-center justify-center bg-navy-900/90 text-center p-4">
+                                        <div className="w-16 h-16 rounded-full bg-navy-800 flex items-center justify-center mb-4 border border-navy-600">
+                                            <i className="fas fa-video-slash text-slate-400 text-2xl"></i>
+                                        </div>
+                                        <p className="text-slate-300 mb-4 text-sm">กล้องถูกปิดอยู่ (Camera is off)</p>
+                                        <Button onClick={startCamera} icon="fa-power-off" className="animate-pulse shadow-[0_0_20px_rgba(100,255,218,0.4)]">
+                                            เปิดใช้งานกล้อง (Enable Camera)
+                                        </Button>
+                                    </div>
+                                ) : (
+                                    <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover camera-feed"></video>
+                                )}
+                                
+                                {isCapturing && (
+                                    <div className="absolute inset-0 bg-white/20 animate-pulse flex items-center justify-center">
+                                        <span className="text-6xl font-bold text-white drop-shadow-lg">{captureCount + 1}/5</span>
+                                    </div>
+                                )}
+                            </div>
+
+                            <div className="flex gap-2 overflow-x-auto pb-2">
+                                {capturedImages.map((img, i) => <img key={i} src={img} className="w-16 h-12 object-cover rounded border border-neon-green/50" />)}
+                                {[...Array(5 - capturedImages.length)].map((_, i) => <div key={i} className="w-16 h-12 bg-navy-800 rounded border border-navy-700"></div>)}
+                            </div>
+                            <div className="flex gap-4">
+                                <Button onClick={startBatchCapture} disabled={!isCameraActive || isCapturing} icon="fa-camera" className="flex-1">
+                                    {isCapturing ? "Scanning..." : "Start Scan (5 Shots)"}
+                                </Button>
+                                <Button onClick={handleSubmit} disabled={capturedImages.length < 5} className="flex-1 bg-blue-600 hover:bg-blue-500" icon="fa-save">Save</Button>
+                            </div>
+                            <canvas ref={canvasRef} className="hidden"></canvas>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- 2. Attendance Panel (Fixed Camera Logic) ---
+        const AttendancePanel = ({ users, onSaveAttendance }) => {
+            const videoRef = useRef(null);
+            const [detectedList, setDetectedList] = useState([]);
+            const [subjectFilter, setSubjectFilter] = useState("");
+            const [secFilter, setSecFilter] = useState("");
+            
+            // State เก็บ Stream
+            const [mediaStream, setMediaStream] = useState(null);
+            const [isCameraActive, setIsCameraActive] = useState(false);
+
+            // Effect: Bind Stream to Video
+            useEffect(() => {
+                if (isCameraActive && mediaStream && videoRef.current) {
+                    videoRef.current.srcObject = mediaStream;
+                    videoRef.current.play().catch(err => console.error(err));
+                }
+            }, [isCameraActive, mediaStream]);
+
+            // Cleanup
+            useEffect(() => {
+                return () => {
+                    if (mediaStream) mediaStream.getTracks().forEach(track => track.stop());
+                };
+            }, [mediaStream]);
+
+            useEffect(() => {
+                const interval = setInterval(() => {
+                    // Simulation only runs if camera is active!
+                    if (isCameraActive && users.length > 0 && Math.random() > 0.6) { 
+                        const randomUser = users[Math.floor(Math.random() * users.length)];
+                        if (subjectFilter && randomUser.subject !== subjectFilter) return;
+                        if (secFilter && randomUser.section !== secFilter) return;
+                        setDetectedList(prev => {
+                            if (!prev.find(u => u.id === randomUser.id)) return [...prev, { ...randomUser, time: new Date().toLocaleTimeString('th-TH'), status: 'Check-in' }];
+                            return prev;
+                        });
+                    }
+                }, 1500);
+                return () => clearInterval(interval);
+            }, [users, subjectFilter, secFilter, isCameraActive]);
+
+            const startCamera = async () => {
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' } });
+                    setMediaStream(stream);
+                    setIsCameraActive(true);
+                } catch (err) {
+                    console.error(err);
+                    alert("ไม่สามารถเปิดกล้องได้");
+                }
+            };
+
+            const handleSave = () => {
+                if (detectedList.length === 0) return alert("ไม่พบข้อมูลที่จะบันทึก");
+                onSaveAttendance(detectedList.map(u => ({ ...u, date: new Date().toLocaleDateString('th-TH') })));
+                setDetectedList([]);
+            };
+
+            return (
+                <div className="h-full flex flex-col animate-[fadeIn_0.5s]">
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+                         <h2 className="text-3xl font-bold text-white border-l-4 border-neon-red pl-4">Live Check-in <span className="text-neon-green text-sm animate-pulse">● Online</span></h2>
+                         <div className="flex gap-2 w-full md:w-auto">
+                            <select className="bg-navy-800 text-white p-2 rounded border border-navy-700 text-sm" onChange={(e) => setSubjectFilter(e.target.value)}>
+                                <option value="">All Subjects</option>
+                                {SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                             <select className="bg-navy-800 text-white p-2 rounded border border-navy-700 text-sm" onChange={(e) => setSecFilter(e.target.value)}>
+                                <option value="">All Sections</option>
+                                {SECTIONS.map(r => <option key={r} value={r}>{r}</option>)}
+                            </select>
+                         </div>
+                    </div>
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 flex-1 min-h-0">
+                        <div className="lg:col-span-2 relative w-full bg-black rounded-2xl overflow-hidden border-2 border-neon-green/30 shadow-[0_0_30px_rgba(100,255,218,0.1)]">
+                            {!isCameraActive ? (
+                                <div className="absolute inset-0 flex flex-col items-center justify-center bg-navy-900/90 text-center p-4">
+                                    <div className="w-20 h-20 rounded-full bg-navy-800 flex items-center justify-center mb-6 border-2 border-neon-green/20 animate-pulse">
+                                        <i className="fas fa-camera text-neon-green text-3xl"></i>
+                                    </div>
+                                    <h3 className="text-xl font-bold text-white mb-2">พร้อมเช็คชื่อหรือยัง?</h3>
+                                    <p className="text-slate-400 mb-6 text-sm">กดปุ่มด้านล่างเพื่อเปิดกล้องและเริ่มระบบ AI</p>
+                                    <Button onClick={startCamera} icon="fa-power-off" variant="primary" className="px-8 py-4 text-lg shadow-neon-green/50">
+                                        เริ่มระบบ (Start Camera)
+                                    </Button>
+                                </div>
+                            ) : (
+                                <>
+                                    <video ref={videoRef} autoPlay muted playsInline className="w-full h-full object-cover camera-feed opacity-80"></video>
+                                    <div className="absolute inset-0 pointer-events-none border-[20px] border-transparent">
+                                        <div className="absolute top-0 left-0 w-16 h-16 border-t-4 border-l-4 border-neon-green"></div>
+                                        <div className="absolute top-0 right-0 w-16 h-16 border-t-4 border-r-4 border-neon-green"></div>
+                                        <div className="absolute bottom-0 left-0 w-16 h-16 border-b-4 border-l-4 border-neon-green"></div>
+                                        <div className="absolute bottom-0 right-0 w-16 h-16 border-b-4 border-r-4 border-neon-green"></div>
+                                    </div>
+                                </>
+                            )}
+                        </div>
+                        <div className="lg:col-span-1 glass-panel rounded-2xl flex flex-col overflow-hidden">
+                            <div className="p-4 bg-navy-900/50 border-b border-navy-700 font-bold text-white flex justify-between">
+                                <span>Detected ({detectedList.length})</span>
+                                <button onClick={() => setDetectedList([])} className="text-red-400 text-xs">Clear</button>
+                            </div>
+                            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                                {detectedList.map((std, i) => (
+                                    <div key={i} className="flex items-center gap-3 bg-navy-800 p-3 rounded-lg border-l-4 border-neon-green">
+                                        <img src={std.photo} className="w-10 h-10 rounded-full object-cover" />
+                                        <div>
+                                            <div className="font-bold text-white text-sm">{std.firstName}</div>
+                                            <div className="text-xs text-slate-400">{std.studentId}</div>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                            <div className="p-4"><Button onClick={handleSave} variant="danger" className="w-full" icon="fa-cloud-upload-alt">Save to Sheet</Button></div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- 3. Stats Panel (No changes needed) ---
+        const StatsPanel = ({ users, logs }) => {
+            const [selectedSubject, setSelectedSubject] = useState(SUBJECTS[0]);
+            const statsData = useMemo(() => {
+                return SECTIONS.map(sec => {
+                    const totalStudents = users.filter(u => u.subject === selectedSubject && u.section === sec).length;
+                    const presentUnique = new Set(logs.filter(l => l.subject === selectedSubject && l.section === sec).map(l => l.studentId)).size;
+                    const percentage = totalStudents === 0 ? 0 : Math.round((presentUnique / totalStudents) * 100);
+                    return { section: sec, total: totalStudents, present: presentUnique, percent: percentage };
+                });
+            }, [users, logs, selectedSubject]);
+
+            const totalEnrolled = statsData.reduce((sum, item) => sum + item.total, 0);
+            const totalPresent = statsData.reduce((sum, item) => sum + item.present, 0);
+            const totalPercent = totalEnrolled === 0 ? 0 : Math.round((totalPresent / totalEnrolled) * 100);
+
+            return (
+                <div className="h-full flex flex-col animate-[fadeIn_0.5s]">
+                    <div className="flex justify-between items-center mb-8">
+                        <h2 className="text-3xl font-bold text-white border-l-4 border-neon-blue pl-4">
+                            Analytics Dashboard <span className="text-sm text-slate-400 font-normal block">สถิติการเข้าเรียนตาม Section</span>
+                        </h2>
+                        <div className="w-64">
+                            <label className="text-xs text-neon-blue mb-1 block">เลือกวิชา (Select Subject)</label>
+                            <select 
+                                value={selectedSubject} 
+                                onChange={(e) => setSelectedSubject(e.target.value)}
+                                className="w-full bg-navy-800 text-white p-3 rounded border border-neon-blue/50 focus:outline-none focus:ring-1 focus:ring-neon-blue"
+                            >
+                                {SUBJECTS.map(s => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                        </div>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+                        <div className="glass-panel p-6 rounded-xl border-l-4 border-white flex items-center justify-between">
+                            <div><p className="text-slate-400 text-sm">Total Students</p><h3 className="text-3xl font-bold text-white">{totalEnrolled}</h3></div>
+                            <i className="fas fa-users text-3xl text-slate-600"></i>
+                        </div>
+                        <div className="glass-panel p-6 rounded-xl border-l-4 border-neon-green flex items-center justify-between">
+                            <div><p className="text-slate-400 text-sm">Present (Check-in)</p><h3 className="text-3xl font-bold text-neon-green">{totalPresent}</h3></div>
+                            <i className="fas fa-check-circle text-3xl text-neon-green/50"></i>
+                        </div>
+                        <div className="glass-panel p-6 rounded-xl border-l-4 border-neon-blue flex items-center justify-between">
+                            <div><p className="text-slate-400 text-sm">Attendance Rate</p><h3 className="text-3xl font-bold text-neon-blue">{totalPercent}%</h3></div>
+                            <i className="fas fa-chart-line text-3xl text-neon-blue/50"></i>
+                        </div>
+                    </div>
+                    <div className="glass-panel p-8 rounded-2xl border border-navy-700 flex-1 overflow-y-auto">
+                        <h3 className="text-xl text-white mb-6 font-bold flex items-center"><i className="fas fa-bar-chart mr-3 text-neon-blue"></i> Attendance by Section ({selectedSubject})</h3>
+                        <div className="space-y-8">
+                            {statsData.map((data, idx) => (
+                                <div key={idx} className="relative">
+                                    <div className="flex justify-between text-sm mb-2">
+                                        <span className="font-bold text-white text-lg">{data.section}</span>
+                                        <span className="text-neon-green font-mono">{data.present}/{data.total} Students ({data.percent}%)</span>
+                                    </div>
+                                    <div className="h-6 w-full bg-navy-900 rounded-full overflow-hidden border border-navy-700 relative">
+                                        <div className="absolute inset-0 grid grid-cols-10 divide-x divide-navy-800/50 w-full h-full z-10 pointer-events-none">{[...Array(9)].map((_,i) => <div key={i}></div>)}</div>
+                                        <div className="h-full bg-gradient-to-r from-blue-600 to-neon-green rounded-full relative z-0 bar-animate transition-all duration-1000 shadow-[0_0_15px_rgba(100,255,218,0.4)]" style={{ width: `${data.percent}%` }}></div>
+                                    </div>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- 4. Data Panel (No changes needed) ---
+        const DataPanel = ({ users, logs }) => {
+            const [view, setView] = useState('users');
+            return (
+                <div className="h-full flex flex-col animate-[fadeIn_0.5s]">
+                    <div className="flex gap-4 mb-6">
+                        <button onClick={() => setView('users')} className={`px-6 py-2 rounded-full font-bold text-sm ${view === 'users' ? 'bg-white text-navy-900' : 'border border-slate-600 text-slate-400'}`}>Student Database</button>
+                        <button onClick={() => setView('logs')} className={`px-6 py-2 rounded-full font-bold text-sm ${view === 'logs' ? 'bg-white text-navy-900' : 'border border-slate-600 text-slate-400'}`}>Activity Logs</button>
+                    </div>
+                    <div className="glass-panel rounded-2xl overflow-hidden flex-1 border border-navy-700 overflow-x-auto">
+                        <table className="w-full text-left text-sm">
+                            <thead className="bg-navy-900 text-slate-300 uppercase">
+                                <tr>{view === 'users' ? ["Photo", "ID", "Name", "Sec", "Subject", "Dataset"].map(h=><th key={h} className="p-4">{h}</th>) : ["Date", "Time", "ID", "Name", "Sec", "Subject"].map(h=><th key={h} className="p-4">{h}</th>)}</tr>
+                            </thead>
+                            <tbody className="divide-y divide-navy-700">
+                                {view === 'users' ? users.map((u, i) => (
+                                    <tr key={i} className="hover:bg-navy-700/50 text-slate-300">
+                                        <td className="p-4"><img src={u.photo} className="w-10 h-10 rounded-full object-cover" /></td>
+                                        <td className="p-4 text-neon-green font-mono">{u.studentId}</td>
+                                        <td className="p-4 text-white">{u.firstName} {u.lastName}</td>
+                                        <td className="p-4"><span className="bg-navy-900 px-2 py-1 rounded text-xs">{u.section}</span></td>
+                                        <td className="p-4">{u.subject}</td>
+                                        <td className="p-4 text-xs text-slate-500">{u.dataset?.length} imgs</td>
+                                    </tr>
+                                )) : logs.map((l, i) => (
+                                    <tr key={i} className="hover:bg-navy-700/50 text-slate-300">
+                                        <td className="p-4">{l.date}</td>
+                                        <td className="p-4 text-neon-green font-mono">{l.time}</td>
+                                        <td className="p-4">{l.studentId}</td>
+                                        <td className="p-4 text-white">{l.firstName} {l.lastName}</td>
+                                        <td className="p-4">{l.section}</td>
+                                        <td className="p-4">{l.subject}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
